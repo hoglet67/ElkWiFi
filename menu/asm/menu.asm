@@ -203,34 +203,21 @@ LINES_PER_SCREEN = 20
     LDY #>oscli_wget
     JSR OSCLI
 
-    ;; *TAPE ...
-    LDX #<oscli_tape
-    LDY #>oscli_tape
+    ;; *WICFS ...
+    LDX #<oscli_wicfs
+    LDY #>oscli_wicfs
     JSR OSCLI
 
-    ;; TODO - FIXME - *QUPCFS should do this!
-    LDA #0
-    STA &C5
-
-    ;; *QUPCFS ...
-    LDX #<oscli_qupcfs
-    LDY #>oscli_qupcfs
+    ;; *KEY 0 ...
+    LDX #<oscli_key0
+    LDY #>oscli_key0
     JSR OSCLI
 
-    ;; Boot CFS
-    LDX #0
-.c_loop
-    STX tmp
-    LDY commands,X
-    BEQ c_done
+    ;; Insert Key0 into Kbd Buffer
     LDA #&99
     LDX #&00
-    JSR OSBYTE
-    LDX tmp
-    INX
-    BNE c_loop
-.c_done
-    RTS
+    LDY #&C0
+    JMP OSBYTE
 }
 
 .commands
@@ -414,11 +401,11 @@ LINES_PER_SCREEN = 20
 .oscli_load_titles
     EQUB "*WGET -U http://192.168.0.205/TITLES", &0D
 
-.oscli_tape
-    EQUB "*TAPE", &0D
+.oscli_wicfs
+    EQUB "*WICFS", &0D
 
-.oscli_qupcfs
-    EQUB "*QUPCFS", &0D
+.oscli_key0
+    EQUB "*KEY 0 *REWIND|MCHAIN ", &22, &22, "|M", &0D
 
 .oscli_wget
     EQUB "*WGET -U http://192.168.0.207/uefarchive/"
