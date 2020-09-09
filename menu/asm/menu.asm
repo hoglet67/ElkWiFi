@@ -1,11 +1,14 @@
 org &E00
 
-
 tmp = &70
 
 title_ptr = &72
 
 title_page = &74
+
+screen = &76
+
+display = &78
 
 uart_mcr = &FC34
 
@@ -19,15 +22,14 @@ OSCLI  = &FFF7
 saved_title_ptr = &C00
 saved_title_page = &C20
 
+LINES_PER_SCREEN = 20
 
 .start_addr
-
-
-.test
 {
 
-    LDX #<oscli_load_data
-    LDY #>oscli_load_data
+    ;; Load title data into &FDxx paged RAM
+    LDX #<oscli_load_titles
+    LDY #>oscli_load_titles
     JSR OSCLI
 
     ;; Select bank 1 in pages RAM, which is where titles have been loaded to
@@ -35,24 +37,30 @@ saved_title_page = &C20
     ORA #&08
     STA uart_mcr
 
-    LDA #&00
-    STA title_ptr
-    LDA #&FD
-    STA title_ptr + 1
+    ;; Start on screen 0
+    LDA #0
+    STA screen
 
-    LDA #&00
-    STA title_page
+    ;; Disable cursor editing so keys can be used to navigate
+    LDA #4
+    LDX #1
+    JSR OSBYTE
 
 
 .loop1
+    ;; Initialize screen
+    JSR init_screen
 
-    LDA #22
-    JSR OSWRCH
-    LDA #3
-    JSR OSWRCH
+    ;; Search through the list title until screen N is reached
+    ;; (this is potentially slow, but could be accelerated with an index)
+    JSR skip_to_screen
 
+    ;; Display a screen full of titles
     LDX #0
 .loop2
+
+    ;; Clear current line
+    ;;JSR clear_line
 
     ;; Save a pointer to this entry
     LDA title_ptr
@@ -67,7 +75,7 @@ saved_title_page = &C20
 
     ;; End of titles?
     CMP #&FF
-    BEQ done
+    BEQ wait_for_key
 
     ;; End of page
     CMP #&FE
@@ -89,21 +97,35 @@ saved_title_page = &C20
     STA title_ptr
 
     INX
-    CPX #24
+    CPX #LINES_PER_SCREEN
     BNE loop2
 
-.done
+.wait_for_key
 
     JSR OSRDCH
 
+    CMP #&8A ;; Up arrow
+    BNE not_screen_next
+    INC screen
+    JMP loop1
+
+.not_screen_next
+    CMP #&8B ;; Down arrow
+    BNE not_screen_prev
+    LDA screen
+    BEQ wait_for_key
+    DEC screen
+    JMP loop1
+
+.not_screen_prev
     AND #&DF
 
     CMP #'Z' + 1
-    BCS loop1
-
+    BCS wait_for_key
     CMP #'A'
-    BCC loop1
+    BCC wait_for_key
 
+    ;; Prepare to load the title....
     SBC #'A'
     TAX
     LDA saved_title_ptr, X
@@ -156,40 +178,50 @@ saved_title_page = &C20
     LDA #13
     STA url, X
 
+    ;; Mode 6
     LDA #22
     JSR OSWRCH
     LDA #6
     JSR OSWRCH
 
-    ;; *QUPCFS
-    LDX #<oscli0
-    LDY #>oscli0
-    JSR OSCLI
+    ;; Enable cursor editing
+    LDA #4
+    LDX #0
+    JSR OSBYTE
 
     ;; print *WGET for debugging
     LDX #0
 .testloop
-    LDA oscli1, X
+    LDA oscli_wget, X
     JSR OSASCI
     INX
     CMP #&0D
     BNE testloop
 
     ;; *WGET ...
-    LDX #<oscli1
-    LDY #>oscli1
+    LDX #<oscli_wget
+    LDY #>oscli_wget
     JSR OSCLI
 
-    ;; *REWIND
-    LDX #<oscli2
-    LDY #>oscli2
+    ;; *TAPE ...
+    LDX #<oscli_tape
+    LDY #>oscli_tape
     JSR OSCLI
 
+    ;; TODO - FIXME - *QUPCFS should do this!
+    LDA #0
+    STA &C5
 
+    ;; *QUPCFS ...
+    LDX #<oscli_qupcfs
+    LDY #>oscli_qupcfs
+    JSR OSCLI
+
+    ;; Boot CFS
     LDX #0
 .c_loop
     STX tmp
-    LDY chain,X
+    LDY commands,X
     BEQ c_done
     LDA #&99
     LDX #&00
@@ -198,9 +230,15 @@ saved_title_page = &C20
     INX
     BNE c_loop
 .c_done
-
     RTS
 }
+
+.commands
+    EQUB "PAGE=&E00", &0D
+    EQUB "NEW", &0D
+    EQUB "CHAIN ", &22, &22, &0D
+    EQUB &00
+
 
 .copy_tmp_string
 {
@@ -216,45 +254,54 @@ saved_title_page = &C20
     RTS
 }
 
+.skip_to_screen
+{
+    LDY #0
+    STY title_page
+    STY &FCFF
 
-.oscli_load_data
-    EQUB "*WGET -U http://192.168.0.205/TITLES", 13
+    LDA screen
+    BEQ done
+    STA tmp
 
-.chain
-    EQUB "CHAIN ", &22, &22, &0D, &00
+.loop1
+    LDX #LINES_PER_SCREEN
 
-.oscli0
-    EQUB "*QUPCFS", 13
+.loop2
+    LDA &FD00, Y
+    CMP #&FF
+    BEQ done
+    CMP #&FE
+    BNE loop3
 
-.oscli1
-    EQUB "*WGET -U http://192.168.0.207/uefarchive/"
+    ;; Skip to next page
+    LDY title_page
+    INY
+    STY title_page
+    STY &FCFF
+    LDY #&00
+    BEQ loop2
 
-.url
-    SKIP &40
+.loop3
+    INY
+    LDA &FD00, Y
+    BPL loop3
 
-.oscli2
-    EQUB "*REWIND", 13
+    INY
+    DEX
+    BNE loop2
 
+    DEC tmp
+    BNE loop1
 
+.done
+    STY title_ptr
 
- rts                \ end of routine
+    LDA #&FD
+    STA title_ptr + 1
 
-\ Alternative bank number set routine, shorter and faster
-.set_bank_1         \ set it to 1
- rts                \ end of routine
-
-;;.OSWRCH
-;;{
-;;    CMP #&80
-;;    BCS ctrl
-;;    CMP #&20
-;;    BCS not_ctrl
-;;.ctrl
-;;    LDA #'#'
-;;.not_ctrl
-;;    JMP &FFEE
-;;}
-
+    RTS
+}
 
 ;; (title_ptr) points to title entry
 .print_title
@@ -272,7 +319,13 @@ saved_title_page = &C20
     JSR print_dir
     LDA #']'
     JSR OSWRCH
-    LDA #' '
+    LDA #31
+    JSR OSWRCH
+    LDA #20
+    JSR OSWRCH
+    TXA
+    CLC
+    ADC #2
     JSR OSWRCH
     LDA title_ptr
     STA tmp
@@ -283,8 +336,6 @@ saved_title_page = &C20
     INY
     JMP OSNEWL
 }
-
-
 
 ;; A = directory id
 .print_dir
@@ -327,7 +378,56 @@ saved_title_page = &C20
     RTS
 }
 
+.init_screen
+{
+    LDX #0
+.loop
+    LDA clear_screen_data, X
+    CMP #&FF
+    BEQ done
+    JSR OSASCI
+    INX
+    BNE loop
+.done
+    RTS
+}
+
+.clear_screen_data
+    EQUB 22, 3, 19, 0, 4, 0, 0, 0
+    EQUB 31, 31, 0, "Electron Wifi Menu"
+    EQUB 31, 0, 2
+    EQUB 23, 1, 0, 0, 0, 0, 0, 0, 0, 0
+    EQUB &FF
+
+.clear_line
+{
+    LDY #79
+    LDA #32
+.loop
+    JSR OSWRCH
+    DEY
+    BNE loop
+    LDA #13
+    JMP OSWRCH
+}
+
+.oscli_load_titles
+    EQUB "*WGET -U http://192.168.0.205/TITLES", &0D
+
+.oscli_tape
+    EQUB "*TAPE", &0D
+
+.oscli_qupcfs
+    EQUB "*QUPCFS", &0D
+
+.oscli_wget
+    EQUB "*WGET -U http://192.168.0.207/uefarchive/"
+
+.url
+    SKIP &40
+
 include "tmp/suffixes.asm"
+
 include "tmp/directories.asm"
 
 .end_addr
