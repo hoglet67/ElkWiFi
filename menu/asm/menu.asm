@@ -400,7 +400,7 @@ LINES_PER_SCREEN = 20
 }
 
 .oscli_load_titles
-    EQUB "*WGET -U http://192.168.0.205/TITLES", &0D
+    EQUB "*WGET -U http://acornelectron.nl/uefarchive/TITLES", &0D
 
 .oscli_wicfs
     EQUB "*WICFS", &0D
