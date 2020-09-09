@@ -1,31 +1,28 @@
 org &E00
 
-tmp = &70
-
-title_ptr = &72
-
-title_page = &74
-
-screen = &76
-
-display = &78
-
-uart_mcr = &FC34
-
-OSRDCH = &FFE0
-OSASCI = &FFE3
-OSNEWL = &FFE7
-OSWRCH = &FFEE
-OSBYTE = &FFF4
-OSCLI  = &FFF7
-
-saved_title_ptr = &C00
+tmp              = &70
+title_ptr        = &72
+title_page       = &74
+screen           = &75
+saved_title_ptr  = &C00
 saved_title_page = &C20
+
+uart_mcr         = &FC34
+
+OSRDCH           = &FFE0
+OSASCI           = &FFE3
+OSNEWL           = &FFE7
+OSWRCH           = &FFEE
+OSBYTE           = &FFF4
+OSCLI            = &FFF7
 
 LINES_PER_SCREEN = 20
 
 .start_addr
 {
+
+    JSR print_string
+    EQUS "Loading title data", 13
 
     ;; Load title data into &FDxx paged RAM
     LDX #<oscli_load_titles
@@ -46,10 +43,9 @@ LINES_PER_SCREEN = 20
     LDX #1
     JSR OSBYTE
 
-
 .loop1
     ;; Initialize screen
-    JSR init_screen
+    JSR clear_screen
 
     ;; Search through the list title until screen N is reached
     ;; (this is potentially slow, but could be accelerated with an index)
@@ -57,11 +53,8 @@ LINES_PER_SCREEN = 20
 
     ;; Display a screen full of titles
     LDX #0
+
 .loop2
-
-    ;; Clear current line
-    ;;JSR clear_line
-
     ;; Save a pointer to this entry
     LDA title_ptr
     STA saved_title_ptr, X
@@ -120,12 +113,12 @@ LINES_PER_SCREEN = 20
 .not_screen_prev
     AND #&DF
 
-    CMP #'Z' + 1
+    CMP #'Z'+1
     BCS wait_for_key
     CMP #'A'
     BCC wait_for_key
 
-    ;; Prepare to load the title....
+    ;; Get the address of the title in &FDxx paged RAM
     SBC #'A'
     TAX
     LDA saved_title_ptr, X
@@ -134,6 +127,7 @@ LINES_PER_SCREEN = 20
     STA title_page
     STA &FCFF
 
+    ;; Construct the URL
     LDX #0
 
     ;; Get pointer to directory
@@ -285,7 +279,7 @@ LINES_PER_SCREEN = 20
     STY title_ptr
 
     LDA #&FD
-    STA title_ptr + 1
+    STA title_ptr+1
 
     RTS
 }
@@ -316,8 +310,8 @@ LINES_PER_SCREEN = 20
     JSR OSWRCH
     LDA title_ptr
     STA tmp
-    LDA title_ptr + 1
-    STA tmp + 1
+    LDA title_ptr+1
+    STA tmp+1
     LDY #1
     JSR print_camel_string
     INY
@@ -331,7 +325,7 @@ LINES_PER_SCREEN = 20
     LDA dirlo, Y
     STA tmp
     LDA dirhi, Y
-    STA tmp + 1
+    STA tmp+1
     LDY #0
     ;; Fall through to print_camel_string
 }
@@ -365,7 +359,7 @@ LINES_PER_SCREEN = 20
     RTS
 }
 
-.init_screen
+.clear_screen
 {
     LDX #0
 .loop
@@ -386,16 +380,23 @@ LINES_PER_SCREEN = 20
     EQUB 23, 1, 0, 0, 0, 0, 0, 0, 0, 0
     EQUB &FF
 
-.clear_line
+.print_string
 {
-    LDY #79
-    LDA #32
+    PLA
+    STA tmp
+    PLA
+    STA tmp+1
+    LDY #&00
 .loop
-    JSR OSWRCH
-    DEY
+    LDA (tmp), Y
+    BMI done
+    JSR OSASCI
+    INC tmp
     BNE loop
-    LDA #13
-    JMP OSWRCH
+    INC tmp+1
+    BNE loop
+.done
+    JMP (tmp)
 }
 
 .oscli_load_titles
@@ -408,7 +409,7 @@ LINES_PER_SCREEN = 20
     EQUB "*KEY 0 *REWIND|MCHAIN ", &22, &22, "|M", &0D
 
 .oscli_wget
-    EQUB "*WGET -U http://192.168.0.207/uefarchive/"
+    EQUB "*WGET -U http://acornelectron.nl/uefarchive/"
 
 .url
     SKIP &40
