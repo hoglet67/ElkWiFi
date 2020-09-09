@@ -130,20 +130,49 @@ public class ProcessIndex {
    }
 
    public void listTitles() {
-      System.out.println(".titles");
+      System.out.println("org &0000");
+      System.out.println(".titles_start");
+      int a = 0;
       for (Title title : titles) {
+         // Calculate the length of a title entry
+         int len = title.filename.length() + 2;
+         // Don't allow a title to straddle a page boundary....
+         if (a + len >= 0xFF) {
+            System.out.println("    EQUB &FE");
+            System.out.println("    ALIGN &100");
+            System.out.println();
+            a = 0;
+         }
          System.out.println("    EQUB &" + toHex(title.dir) + ", \"" + title.filename + "\", &" + toHex(128 + title.suffix));
+         a += len;
       }
-      System.out.println();
+      System.out.println(" EQUB &FF");
+      System.out.println(".titles_end");
+      System.out.println("SAVE \"TITLES\",titles_start, titles_end");
    }
 
 
    public static void main(String[] args) {
       try {
          ProcessIndex pi = new ProcessIndex(Files.readAllLines(Paths.get("../data/index.txt")));
-         pi.listSuffixes();
-         pi.listDirs();
-         pi.listTitles();
+         for (String arg : args) {
+            if (arg.equals("-s")) {
+               pi.listSuffixes();
+               break;
+            }
+         }
+         for (String arg : args) {
+            if (arg.equals("-d")) {
+               pi.listDirs();
+               break;
+            }
+         }
+         for (String arg : args) {
+            if (arg.equals("-t")) {
+               pi.listTitles();
+               break;
+            }
+         }
       } catch (Exception e) {
          e.printStackTrace();
       }

@@ -2,4 +2,6 @@
 *~
 #*
 *.log
-MENU
+menu/asm/MENU
+menu/asm/TITLES
+menu/asm/tmp/

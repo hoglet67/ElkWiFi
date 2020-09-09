@@ -3,8 +3,11 @@ org &E00
 
 tmp = &70
 
-
 title_ptr = &72
+
+title_page = &74
+
+uart_mcr = &FC34
 
 OSRDCH = &FFE0
 OSASCI = &FFE3
@@ -13,8 +16,8 @@ OSWRCH = &FFEE
 OSBYTE = &FFF4
 OSCLI  = &FFF7
 
-saved_title_lo = &C00
-saved_title_hi = &C20
+saved_title_ptr = &C00
+saved_title_page = &C20
 
 
 .start_addr
@@ -23,34 +26,60 @@ saved_title_hi = &C20
 .test
 {
 
+    LDX #<oscli_load_data
+    LDY #>oscli_load_data
+    JSR OSCLI
 
+    ;; Select bank 1 in pages RAM, which is where titles have been loaded to
+    LDA uart_mcr
+    ORA #&08
+    STA uart_mcr
 
-
-    LDA #<titles
+    LDA #&00
     STA title_ptr
-    LDA #>titles
+    LDA #&FD
     STA title_ptr + 1
+
+    LDA #&00
+    STA title_page
 
 
 .loop1
 
     LDA #22
     JSR OSWRCH
-    LDA #4
+    LDA #3
     JSR OSWRCH
 
     LDX #0
 .loop2
 
+    ;; Save a pointer to this entry
     LDA title_ptr
-    STA saved_title_lo, X
-    LDA title_ptr+1
-    STA saved_title_hi, X
+    STA saved_title_ptr, X
+    LDA title_page
+    STA saved_title_page, X
+    STA &FCFF
 
+    ;; Read the first byte of the title
     LDY #0
     LDA (title_ptr), Y
+
+    ;; End of titles?
     CMP #&FF
-    BMI done
+    BEQ done
+
+    ;; End of page
+    CMP #&FE
+    BNE process_title
+
+    ;; Skip to the next page
+    INC title_page
+    LDA #0
+    STA title_ptr
+    BEQ loop2
+
+.process_title
 
     JSR print_title
 
@@ -58,9 +87,6 @@ saved_title_hi = &C20
     CLC
     ADC title_ptr
     STA title_ptr
-    LDA title_ptr + 1
-    ADC #0
-    STA title_ptr + 1
 
     INX
     CPX #24
@@ -80,11 +106,11 @@ saved_title_hi = &C20
 
     SBC #'A'
     TAX
-    LDA saved_title_lo, X
+    LDA saved_title_ptr, X
     STA title_ptr
-    LDA saved_title_hi, X
-    STA title_ptr+1
-
+    LDA saved_title_page, X
+    STA title_page
+    STA &FCFF
 
     LDX #0
 
@@ -192,7 +218,7 @@ saved_title_hi = &C20
 
 
 .oscli_load_data
-    EQUB "*WGET -U http://192.168.0.205/DATA", 13
+    EQUB "*WGET -U http://192.168.0.205/TITLES", 13
 
 .chain
     EQUB "CHAIN ", &22, &22, &0D, &00
@@ -210,6 +236,12 @@ saved_title_hi = &C20
     EQUB "*REWIND", 13
 
 
+
+ rts                \ end of routine
+
+\ Alternative bank number set routine, shorter and faster
+.set_bank_1         \ set it to 1
+ rts                \ end of routine
 
 ;;.OSWRCH
 ;;{
@@ -295,7 +327,8 @@ saved_title_hi = &C20
     RTS
 }
 
-include "data.asm"
+include "tmp/suffixes.asm"
+include "tmp/directories.asm"
 
 .end_addr
 
