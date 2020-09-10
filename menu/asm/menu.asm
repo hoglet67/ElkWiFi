@@ -43,9 +43,11 @@ LINES_PER_SCREEN = 20
     LDX #1
     JSR OSBYTE
 
-.loop1
     ;; Initialize screen
-    JSR clear_screen
+    JSR init_screen
+
+.loop1
+    JSR disable_screen
 
     ;; Search through the list title until screen N is reached
     ;; (this is potentially slow, but could be accelerated with an index)
@@ -68,7 +70,7 @@ LINES_PER_SCREEN = 20
 
     ;; End of titles?
     CMP #&FF
-    BEQ wait_for_key
+    BEQ process_done
 
     ;; End of page
     CMP #&FE
@@ -93,7 +95,12 @@ LINES_PER_SCREEN = 20
     CPX #LINES_PER_SCREEN
     BNE loop2
 
+.process_done
+
+    JSR enable_screen
+
 .wait_for_key
+
 
     JSR OSRDCH
 
@@ -302,7 +309,7 @@ LINES_PER_SCREEN = 20
     JSR OSWRCH
     LDA #31
     JSR OSWRCH
-    LDA #20
+    LDA #28
     JSR OSWRCH
     TXA
     CLC
@@ -359,26 +366,39 @@ LINES_PER_SCREEN = 20
     RTS
 }
 
-.clear_screen
+.init_screen
 {
-    LDX #0
-.loop
-    LDA clear_screen_data, X
-    CMP #&FF
-    BEQ done
-    JSR OSASCI
-    INX
-    BNE loop
-.done
+    JSR print_string
+    EQUB 22, 3, 19, 0, 4, 0, 0, 0
+    EQUB 23, 1, 0, 0, 0, 0, 0, 0, 0, 0
+    NOP
     RTS
 }
 
-.clear_screen_data
-    EQUB 22, 3, 19, 0, 4, 0, 0, 0
+.disable_screen
+{
+    LDA #&B0
+    STA &FE07
+    JSR print_string
+    EQUB 12
+    EQUB 19, 7, 4, 0, 0, 0
     EQUB 31, 31, 0, "Electron Wifi Menu"
     EQUB 31, 0, 2
-    EQUB 23, 1, 0, 0, 0, 0, 0, 0, 0, 0
-    EQUB &FF
+    NOP
+    RTS
+}
+
+.enable_screen
+{
+    LDA #&13
+    JSR OSBYTE
+    LDA #&98
+    STA &FE07
+    JSR print_string
+    EQUB 19, 7, 7, 0, 0, 0
+    NOP
+    RTS
+}
 
 .print_string
 {
