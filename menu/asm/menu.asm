@@ -6,6 +6,7 @@ title_page       = &74
 screen           = &75
 cursor           = &76
 tmpy             = &78
+mode             = &79
 
 saved_title_ptr  = &C00
 saved_title_page = &C20
@@ -47,6 +48,10 @@ LINES_PER_SCREEN = 20
 
     ;; Initialize screen
     JSR init_screen
+
+    ;; Set update mode to slow
+    LDA #0
+    STA mode
 
 .loop1
     JSR disable_screen
@@ -112,6 +117,15 @@ LINES_PER_SCREEN = 20
 
     JSR OSRDCH
 
+    CMP #&0D
+    BNE not_return
+    ;; Toggle fast mode bit
+    LDA mode
+    EOR #&80
+    STA mode
+    JMP loop1
+
+.not_return
     CMP #&8A ;; Up arrow
     BNE not_screen_next
     INC screen
@@ -469,6 +483,9 @@ LINES_PER_SCREEN = 20
 
 .disable_screen
 {
+    ;; Test for the fast mode bit
+    BIT mode
+    BPL done
     ;; Set the FG colour to Blue
     ;; Same as VDU 19,7,4;0;
     LDA #&05
@@ -478,11 +495,15 @@ LINES_PER_SCREEN = 20
     ;; Switch to Mode 6
     LDA #&B0
     STA &FE07
+.done
     RTS
 }
 
 .enable_screen
 {
+    ;; Test for the fast mode bit
+    BIT mode
+    BPL done
     ;; Wait for VSYNC
     LDA #&13
     JSR OSBYTE
@@ -495,6 +516,7 @@ LINES_PER_SCREEN = 20
     STA &FE08
     LDA #&11
     STA &FE09
+.done
     RTS
 }
 
