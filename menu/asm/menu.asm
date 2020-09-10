@@ -4,9 +4,11 @@ tmp              = &70
 title_ptr        = &72
 title_page       = &74
 screen           = &75
+cursor           = &76
+tmpy             = &78
+
 saved_title_ptr  = &C00
 saved_title_page = &C20
-
 uart_mcr         = &FC34
 
 OSRDCH           = &FFE0
@@ -52,6 +54,13 @@ LINES_PER_SCREEN = 20
     ;; Search through the list title until screen N is reached
     ;; (this is potentially slow, but could be accelerated with an index)
     JSR skip_to_screen
+
+    ;; Set "fast printing" cursor to line 2
+    LDA #<(&4000 + 2 * 640)
+    STA cursor
+    LDA #>(&4000 + 2 * 640)
+    STA cursor + 1
+
 
     ;; Display a screen full of titles
     LDX #0
@@ -100,7 +109,6 @@ LINES_PER_SCREEN = 20
     JSR enable_screen
 
 .wait_for_key
-
 
     JSR OSRDCH
 
@@ -295,26 +303,25 @@ LINES_PER_SCREEN = 20
 .print_title
 {
     TXA
+    PHA
     CLC
     ADC #'A'
-    JSR OSWRCH
-    LDA #' '
-    JSR OSWRCH
+    JSR fast_OSWRCH
+    JSR fast_space
     LDA #'['
-    JSR OSWRCH
+    JSR fast_OSWRCH
     LDY #0
     LDA (title_ptr), Y
     JSR print_dir
     LDA #']'
-    JSR OSWRCH
-    LDA #31
-    JSR OSWRCH
-    LDA #28
-    JSR OSWRCH
-    TXA
-    CLC
-    ADC #2
-    JSR OSWRCH
+    JSR fast_OSWRCH
+
+.loop1
+    JSR fast_space
+    INX
+    CPX #24
+    BCC loop1
+
     LDA title_ptr
     STA tmp
     LDA title_ptr+1
@@ -322,7 +329,16 @@ LINES_PER_SCREEN = 20
     LDY #1
     JSR print_camel_string
     INY
-    JMP OSNEWL
+
+.loop2
+    JSR fast_space
+    INX
+    CPX #52
+    BCC loop2
+
+    PLA
+    TAX
+    RTS
 }
 
 ;; A = directory id
@@ -339,11 +355,14 @@ LINES_PER_SCREEN = 20
 
 ;; Print Camel-Cased String, inserting spaces where appropriate
 ;; (tmp),y points to string
+;; return number of characters
 ;;
 .print_camel_string
 {
+    LDX #0
     LDA (tmp), Y
-    JSR OSWRCH
+    JSR fast_OSWRCH
+    INX
 .loop
     INY
     LDA (tmp), Y
@@ -356,13 +375,84 @@ LINES_PER_SCREEN = 20
     CMP #'Z'+1
     BCS not_caps
     PHA
-    LDA #' '
-    JSR OSWRCH
+    JSR fast_space
+    INX
     PLA
 .not_caps
-    JSR OSWRCH
+    JSR fast_OSWRCH
+    INX
     JMP loop
 .done
+    RTS
+}
+
+.fast_OSWRCH
+{
+    STY tmpy
+    ;; Calculate the address of the character data
+    ;; = &C000 + (A - &20) * 8
+    ;; = (&1800 + A - &20) * 8
+    ;; Self-modifying code
+    SEC
+    SBC #&20
+    LDY #&18
+    STY loop + 2
+    ASL A
+    ROL loop + 2
+    ASL A
+    ROL loop + 2
+    ASL A
+    ROL loop + 2
+    STA loop + 1
+    ;; Copy the character to the cursor
+    LDY #7
+.loop
+    LDA &0000, Y
+    STA (cursor), Y
+    DEY
+    BPL loop
+    ;; Move cursor to the next character position
+    LDA cursor
+    CLC
+    ADC #&08
+    STA cursor
+    BCC done
+    INC cursor + 1
+.done
+    LDY tmpy
+    RTS
+}
+
+.fast_space
+{
+    STY tmpy
+    ;; Clear the 8 bytes at the cursor
+    LDA #0
+    TAY
+    STA (cursor), Y
+    INY
+    STA (cursor), Y
+    INY
+    STA (cursor), Y
+    INY
+    STA (cursor), Y
+    INY
+    STA (cursor), Y
+    INY
+    STA (cursor), Y
+    INY
+    STA (cursor), Y
+    INY
+    STA (cursor), Y
+    ;; Move cursor to the next character position
+    LDA cursor
+    CLC
+    ADC #&08
+    STA cursor
+    BCC done
+    INC cursor + 1
+.done
+    LDY tmpy
     RTS
 }
 
@@ -371,32 +461,40 @@ LINES_PER_SCREEN = 20
     JSR print_string
     EQUB 22, 3, 19, 0, 4, 0, 0, 0
     EQUB 23, 1, 0, 0, 0, 0, 0, 0, 0, 0
-    NOP
-    RTS
-}
-
-.disable_screen
-{
-    LDA #&B0
-    STA &FE07
-    JSR print_string
-    EQUB 12
-    EQUB 19, 7, 4, 0, 0, 0
     EQUB 31, 31, 0, "Electron Wifi Menu"
     EQUB 31, 0, 2
     NOP
     RTS
 }
 
+.disable_screen
+{
+    ;; Set the FG colour to Blue
+    ;; Same as VDU 19,7,4;0;
+    LDA #&05
+    STA &FE08
+    LDA #&55
+    STA &FE09
+    ;; Switch to Mode 6
+    LDA #&B0
+    STA &FE07
+    RTS
+}
+
 .enable_screen
 {
+    ;; Wait for VSYNC
     LDA #&13
     JSR OSBYTE
+    ;; Switch to Mode 3
     LDA #&98
     STA &FE07
-    JSR print_string
-    EQUB 19, 7, 7, 0, 0, 0
-    NOP
+    ;; Set the FG colour to White
+    ;; Same as VDU 19,7,7;0;
+    LDA #&01
+    STA &FE08
+    LDA #&11
+    STA &FE09
     RTS
 }
 
