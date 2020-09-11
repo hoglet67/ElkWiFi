@@ -15,38 +15,35 @@
 
 \System constants and program constants & variables
 
+ELK_OSBYTE = &E544
+ELK_OSFILE = &F1D6
+ELK_OSBGET = &F420
+ELK_OSFIND = &F320
+ELK_OSFSC  = &F0E8
+
 OSWORD  =       &FFF1           \OSWORD
 OSASCI  =       $FFE3           \print A to screen
 OSBYTE  =       $FFF4           \OSBYTE
 OSRDCH  =       $FFE0           \read character from input stream
 OSWRCH  =       $FFEE           \write character to output stream
 
+OSBYTEV =       &020A           \OSBYTE vector
 OSFILEV =       &0212           \OS FILEV vector
-OSFSCV  =       &021E           \OS FSCV vector
-BYTEV   =       &020A           \OSBYTE vector
-OSFINDV =       &021C           \OSFIND vector (Open sequential)
 OSBGETV =       &0216           \OSBGET vector (sequential read)
+OSFINDV =       &021C           \OSFIND vector (Open sequential)
+OSFSCV  =       &021E           \OS FSCV vector
 
-FILVRTN =       &03A3           \Tape FILEV vector contents
-FSCVRTN =       &03A5           \Tape FSCV vector contents
-
-serbuf  =       &06E0           \serial input buffer
-romsel  =       &07A4           \location of external rom select code
-notape  =       &0398           \location of external *TAPE trap
 hchunk  =       &03CB           \Chunk header type(2) + length(4)
 
-bufsize =       28              \data burst (buffer) size
 sbuft   =       &F5             \flag to indicate start of UEF
 sbufl   =       &F8             \number of bytes left (lo)
 sbufh   =       &F9             \number of bytes left (hi)
 temp    =       &C4             \zp temporary
-slotid  =       &C5             \UPCSF slot id (from UPURS handler)
-currom  =       &CF             \current rom slot id (usually BASIC)
 tmpidx  =       &C1             \temporary store for index pointers
 fnlen   =       &C2             \length of current CFS block filename
 inchunk =       &CE             \chunk started (non-zero = yes)
-pbl         =   &B8             \parameter block lo (X)
-pbh         =   &B9             \parameter block hi (Y)
+pbl     =       &B8             \parameter block lo (X)
+pbh     =       &B9             \parameter block hi (Y)
 loadrun =       &BA             \b0 load addr : 0 = caller, 1 = file
                                 \b1 *CAT : 1 = True
                                 \b7 load/run  : 0 = *LOAD, 1 = *RUN
@@ -57,15 +54,15 @@ nxtblk  =       &B6             \next CFS block number
 blklen  =       &B5             \copy of block length ls byte
 optmask =       &B7             \mask for *OPT setting (two values)
 
-pr_y    =   &C7     \data pointor to paged ram (Y-reg)
-pr_r    =   &C8     \data pointer to paged ram (page register)
+pr_y    =       &C7             \data pointor to paged ram (Y-reg)
+pr_r    =       &C8             \data pointer to paged ram (page register)
 
-                                    \the following locations are re-entrant
-                                    \and must only be initialised on *UPCFS
+                                \the following locations are re-entrant
+                                \and must only be initialised on *UPCFS
 
 sfopen  =       &BE             \b7 sequential file open : 1 = true
-                                    \b2 sequential EOF : 1 = true
-                                    \b1 last block read : 1 = true
+                                \b2 sequential EOF : 1 = true
+                                \b1 last block read : 1 = true
                                 \b0 read buffer empty : 1 = true
 sfptr   =       &BF             \sequential file pointer (0-&FF)
 
@@ -74,11 +71,11 @@ sfptr   =       &BF             \sequential file pointer (0-&FF)
 vdu_off =       21              \turn screen off (0 for debug)
 vdu_on  =       6               \turn screen on
 
-cr          =   13          \<cr>
-sp          =   32          \<sp>
-esc         =   27          \<Escape>
+cr          =   13              \<cr>
+sp          =   32              \<sp>
+esc         =   27              \<Escape>
 
-__debug =   0       \print debug information
+__debug =   0                   \print debug information
 
 \end of declarations
 
@@ -92,11 +89,7 @@ __debug =   0       \print debug information
 
         JMP     bUPCFS          \jump to *QUPCFS command handler
 
-\-------------------------------------------------------------------------------
-\Fills the buffer at serbuf, data fetched from paged RAM
-\with [(bufsize) + overrun] bytes. Cycle critical code.
 
-\-------------------------------------------------------------------------------
 \*UPCFS handler. This is the user entered command to select the UPURS FS.
 \This command configures the Beeb ready for the vector steal. It inserts a
 \series of commands into the KB buffer and then returns. The final command
@@ -104,14 +97,12 @@ __debug =   0       \print debug information
 
 .wicfs_cmd
 .aUPCFS
-    if __debug = 1
-    php:jsr debug
-    equs "in aupcfs",&0D,&EA
-    plp
-    endif
+        if __debug = 1
+        php:jsr debug
+        equs "in aupcfs",&0D,&EA
+        plp
+        endif
 
-        LDA     &F4                 \record which slot UPURS occupies
-        STA     slotid
         LDA     #vdu_off        \turn off screen output to hide
         JSR     OSASCI          \KB auto-command sequence
         LDX     #0                  \character pointer
@@ -148,72 +139,92 @@ __debug =   0       \print debug information
 
 \external *UPCFS interface code
 .bUPCFS
-    if __debug = 1
-    php:jsr debug
-    equs "in bupcfs",&0D,&EA
-    plp
-    endif
-    LDX #0                      \index on X
-.b_a1
-        LDA     s_filev,X               \get a byte
-        STA     romsel,X                \copy to ram
-        INX                             \increment index
-        CPX     #(s_end-s_filev)        \all done?
-        BNE     b_a1            \no, loop for next
+        if __debug = 1
+        php:jsr debug
+        equs "in bupcfs",&0D,&EA
+        plp
+        endif
 
-\and external code for *TAPE trap
-        LDX     #0                      \index on X
-.b_a2
-        LDA     osb_s,X                 \get a byte
-        STA     notape,X                \copy to ram
-        INX                             \increment index
-        CPX     #(osb_e-osb_s)  \all done?
-        BNE     b_a2            \no, loop for next
+        SEI
 
-\now set the UPCFS vectors
-        LDA     OSFILEV             \preserve OS tape vector addresses
-        STA     FILVRTN
-        LDA     OSFILEV+1
-        STA     FILVRTN+1
+        \ read the location of the extended bector block
+        LDA #&A8
+        LDX #&00
+        LDY #&FF
+        JSR OSBYTE
+        STX temp
+        STY temp+1
 
-        LDA     OSFSCV
-        STA     FSCVRTN
-        LDA     OSFSCV+1
-        STA     FSCVRTN+1
+        \ setup UPCFS extended vectors
 
-\new UPCFS vector addresses
-        LDA     #<romsel                \FILEV, FINDV
-        STA     OSFILEV
-        STA     OSFINDV
+        LDX #&FF
+        LDY #&00
 
-        LDA     #>romsel
-        STA     OSFILEV+1
-        STA     OSFINDV+1
+        LDY #&0F
+        STY OSBYTEV
+        STX OSBYTEV+1
+        LDA #<upbytev
+        STA (temp), Y
+        INY
+        LDA #>upbytev
+        STA (temp), Y
+        INY
+        LDA &F4
+        STA (temp), Y
 
-        LDA     #<(romsel+(s_fscv-s_filev))     \FSCV
-        STA     OSFSCV
-        LDA     #>(romsel+(s_fscv-s_filev))
-        STA     OSFSCV+1
+        LDY #&1B
+        STY OSFILEV
+        STX OSFILEV+1
+        LDA #<upfilev
+        STA (temp), Y
+        INY
+        LDA #>upfilev
+        STA (temp), Y
+        INY
+        LDA &F4
+        STA (temp), Y
 
-        LDA     #<(romsel+(s_bgetv-s_filev))    \BGETV
-        STA     OSBGETV
-        LDA     #>(romsel+(s_bgetv-s_filev))
-        STA     OSBGETV+1
+        LDY #&21
+        STY OSBGETV
+        STX OSBGETV+1
+        LDA #<upbgetv
+        STA (temp), Y
+        INY
+        LDA #>upbgetv
+        STA (temp), Y
+        INY
+        LDA &F4
+        STA (temp), Y
 
-        LDA     BYTEV               \OSBYTE intercept
-        STA     notape+(osb_j-osb_s)+1
-        LDA     BYTEV+1
-        STA     notape+(osb_j-osb_s)+2
-        SEI                             \no interrupts during OSBYTE redirect
-        LDA     #<notape
-        STA     BYTEV
-        LDA     #>notape
-        STA     BYTEV+1
+        LDY #&2A
+        STY OSFINDV
+        STX OSFINDV+1
+        LDA #<upfilev   \ DMB: seperate filev impl
+        STA (temp), Y
+        INY
+        LDA #>upfilev   \ DMB: seperate filev impl
+        STA (temp), Y
+        INY
+        LDA &F4
+        STA (temp), Y
+
+        LDY #&2D
+        STY OSFSCV
+        STX OSFSCV+1
+        LDA #<upfscv
+        STA (temp), Y
+        INY
+        LDA #>upfscv
+        STA (temp), Y
+        INY
+        LDA &F4
+        STA (temp), Y
+
         CLI
         JSR     cfsinit             \initialisations
 
 .brom
-    LDA #vdu_on             \restore screen output
+        LDA     #vdu_on             \restore screen output
         JSR     OSASCI
         LDA     #0                      \display UPCFS banner
         JSR     xmess
@@ -221,7 +232,7 @@ __debug =   0       \print debug information
         JSR     xmess
 
 .Bquit
-    PLA                         \UPCFS initialisation complete so..
+        PLA                         \UPCFS initialisation complete so..
         TAY                             \..restore registers and return to OS
         PLA
         TAX
@@ -233,11 +244,12 @@ __debug =   0       \print debug information
 \load & run (*RUN), sequential access file open and single byte get.
 
 .upfilev
-    if __debug = 1
-    php:jsr debug
-    equs "in upfilev",&0D,&EA
-    plp
-    endif
+        if __debug = 1
+        php:jsr debug
+        equs "in upfilev",&0D,&EA
+        plp
+        endif
+        CMP     #0
         BEQ     upf_a7          \If A=0, possible file close request
         CMP     #255            \file load?
         BEQ     upf_a1          \yes, goto process
@@ -254,10 +266,10 @@ __debug =   0       \print debug information
         STA     sfptr
         BEQ     upf_a5          \and exit claiming command
 
-.upf_a6 JMP     xfilev          \not supported, exit no action
+.upf_a6 JMP     ELK_OSFILE      \and follow original FILEV vector
 
 .upf_a1 JSR     starload                \goto action file load
-        JMP     romsel+(actioned-s_filev)       \and return claiming command
+        JMP     actioned        \and return claiming command
 
 .upf_a2 CMP     #128            \exclusive output request?
         BNE     upf_a3          \no, includes input sp process
@@ -273,9 +285,8 @@ __debug =   0       \print debug information
 
 .upf_a4 JSR     fopen           \goto action file open
 
-.upf_a5 JMP     romsel+(actioned-s_filev)       \and return claiming command
+.upf_a5 JMP     actioned        \and return claiming command
 
-.xfilev JMP     romsel+(x_filev-s_filev)        \return command unclaimed
 
 \...............................................................................
 \Filters selected FSCV functions
@@ -308,7 +319,7 @@ __debug =   0       \print debug information
         DEX                     \else return X = &FF = true
         BNE     clfscv          \end of EOF test
 
-.upv_a2 JMP     xfscv           \not a supported UPCFS command, exit
+.upv_a2 JMP     ELK_OSFSC       \not a supported UPCFS command, exit
 
 .uprun
     if __debug = 1
@@ -322,9 +333,7 @@ __debug =   0       \print debug information
         AND     #&7F
         STA     loadrun
 
-.clfscv JMP     romsel+(actioned-s_filev)       \return command claimed
-
-.xfscv  JMP     romsel+(x_fscv-s_filev) \return command unclaimed
+.clfscv JMP     actioned        \return command claimed
 
 \...............................................................................
 \Handles BGET (single byte read from sequential access file)
@@ -358,96 +367,32 @@ __debug =   0       \print debug information
         TAX
         LDA     temp
 
-        JMP     romsel+(actioned-s_filev)       \and return claiming command
-                                                \via FILEV and simple RTS
+        JMP     actioned        \and return claiming command
+                                \via FILEV and simple RTS
 
-\===============================================================================
-\Sideways ROM select code downloaded to ram @romsel. Allows intercepted FS
-\vectors to call UPCFS code in rom and to return claimed or unclaimed as
-\required.
 
-\Code begins with entry points for UPCFS intercepts
-
-.s_filev        JSR     romsel+(aupurs-s_filev) \page in UPURS
-        JMP     upfilev                 \and jump to UPCFS FILEV
-
-.s_fscv JSR     romsel+(aupurs-s_filev) \page in UPURS
-        JMP     upfscv                  \and jump to UPCFS FSCV
-
-.s_bgetv        JSR     romsel+(aupurs-s_filev) \page in UPURS
-        JMP     upbgetv                 \and jump to UPCFS BGETV
-
-\...............................................................................
-\Local common subroutine to select UPURS rom
-
-.aupurs
-        PHA                     \preserve A
-        SEI                     \no interrupts during rom switching
-        LDA     &F4             \log current sw rom (probably BASIC)
-        STA     currom
-        LDA     #&C             \deselect BASIC (Elk quirk)
-        STA     &FE05
-        LDA     slotid          \then select UPURS rom
-        STA     &F4
-        STA     &FE05
-        CLI                     \restore interrupts
-        PLA                     \restore A
-        RTS                     \roms switched, return
-
-\-------------------------------------------------------------------------------
-\Return handler post-UPCFS processing
-
-\1. Return path for unclaimed commands
-
-                                \deselect UPURS and select previous rom
-.x_filev        JSR     romsel+(bupurs-s_filev)
-        JMP     (FILVRTN)               \and follow original FILEV vector
-
-                                \deselect UPURS and select previous rom
-.x_fscv JSR     romsel+(bupurs-s_filev)
-        JMP     (FSCVRTN)               \and follow original FSCV vector
 
 \2. Return path for claimed commands
 
                                 \deselect UPURS and select previous rom
-.actioned       JSR     romsel+(bupurs-s_filev)
-
+.actioned
         LDY     loadrun         \are we running the program?
         BPL     ret_fscv                \no, return to OS
         PLA                     \else dump OS call return
         PLA
         JMP     (&03C2)         \and execute loaded program
 
-.ret_fscv       RTS                     \simple RTS as command actioned
-
-\...............................................................................
-\Local common subroutine to deselect UPURS rom
-
-.bupurs
-        PHA                     \preserve A
-        SEI                     \no interrupts during rom switching
-        LDA     currom          \restore active rom prior to UPCFS call
-        STA     &F4
-        STA     &FE05
-        CLI                     \restore interrupts
-        PLA                     \restore A
-        RTS                     \roms switched, return
-
-\...............................................................................
-
-.s_end  NOP                     \dummy address marker for code download
+.ret_fscv  RTS                     \simple RTS as command actioned
 
 \~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 \Download code for OSBYTE *TAPE trap. Copied to notape by *QUPCFS
 
-.osb_s
+.upbytev
         CMP     #&8C            \*TAPE ?
-        BNE     osb_j           \no, continue to OSBYTE
-        RTS                     \yes, return no action
-
-.osb_j  JMP     &0000           \continue to OSBYTE at OS vector..
-                                        \..address written by *QUPCFS
-.osb_e  NOP
+        BEQ     notape          \yes, return no action
+        JMP     ELK_OSBYTE      \continue to OSBYTE at OS vector..
+.notape
+        RTS
 
 \===============================================================================
 \Loads a file into memory (*LOAD)
