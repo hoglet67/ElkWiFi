@@ -7,6 +7,11 @@ screen           = &75
 cursor           = &76
 tmpy             = &78
 mode             = &79
+num_screens      = &7A
+num_titles       = &7B
+num              = &7D
+pad              = &80
+jump             = &81
 
 saved_title_ptr  = &C00
 saved_title_page = &C20
@@ -19,7 +24,7 @@ OSWRCH           = &FFEE
 OSBYTE           = &FFF4
 OSCLI            = &FFF7
 
-LINES_PER_SCREEN = 20
+LINES_PER_SCREEN = 21
 
 .start_addr
 {
@@ -37,8 +42,11 @@ LINES_PER_SCREEN = 20
     ORA #&08
     STA uart_mcr
 
-    ;; Start on screen 0
-    LDA #0
+    ;; Work out number of titles
+    JSR count_titles
+
+    ;; Start on screen 1
+    LDA #1
     STA screen
 
     ;; Disable cursor editing so keys can be used to navigate
@@ -62,7 +70,13 @@ LINES_PER_SCREEN = 20
     STA mode
 
 .loop1
+
+    LDA #&FF
+    STA jump
+
     JSR disable_screen
+
+    JSR update_screen_number
 
     ;; Search through the list title until screen N is reached
     ;; (this is potentially slow, but could be accelerated with an index)
@@ -73,7 +87,6 @@ LINES_PER_SCREEN = 20
     STA cursor
     LDA #>(&4000 + 2 * 640)
     STA cursor + 1
-
 
     ;; Display a screen full of titles
     LDX #0
@@ -125,6 +138,15 @@ LINES_PER_SCREEN = 20
 
     JSR OSRDCH
 
+    CMP #'0'
+    BCC not_0_9
+    CMP #'9' +1
+    BCS not_0_9
+    JSR jump_to_screen
+    BCS wait_for_key
+    BCC loop1
+
+.not_0_9
     CMP #&0D
     BNE not_return
     ;; Toggle fast mode bit
@@ -136,21 +158,21 @@ LINES_PER_SCREEN = 20
 .not_return
     CMP #&8A ;; Up arrow
     BNE not_screen_next
-    INC screen
-    JMP loop1
+    JSR next_screen
+    BCS wait_for_key
+    BCC loop1
 
 .not_screen_next
     CMP #&8B ;; Down arrow
     BNE not_screen_prev
-    LDA screen
-    BEQ wait_for_key
-    DEC screen
-    JMP loop1
+    JSR prev_screen
+    BCS wait_for_key
+    BCC loop1
 
 .not_screen_prev
     AND #&DF
 
-    CMP #'Z'+1
+    CMP #'A'+LINES_PER_SCREEN
     BCS wait_for_key
     CMP #'A'
     BCC wait_for_key
@@ -258,6 +280,59 @@ LINES_PER_SCREEN = 20
     EQUB &00
 
 
+.next_screen
+{
+    LDA screen
+    CMP num_screens
+    BCS skip
+    INC screen
+.skip
+    RTS
+}
+
+.prev_screen
+{
+    LDA #1
+    CMP screen
+    BCS skip
+    DEC screen
+.skip
+    RTS
+}
+
+.jump_to_screen
+{
+    AND #&0F
+    BIT jump
+    BMI first_digit
+.second_digit
+    CLC
+    ADC jump
+    BEQ zero
+    CMP num_screens
+    BCC done
+    BEQ done
+.zero
+    LDA #&FF
+    BNE reset
+.first_digit
+    STA jump
+    LDX #10
+    LDA #0
+.loop_x10
+    ADC jump
+    DEX
+    BNE loop_x10
+.reset
+    STA jump
+    SEC
+    RTS
+.done
+    STA screen
+    CLC
+    RTS
+}
+
 .copy_tmp_string
 {
 .loop
@@ -272,15 +347,79 @@ LINES_PER_SCREEN = 20
     RTS
 }
 
+
+.count_titles
+{
+    LDY #0
+    STY title_page
+    STY &FCFF
+    STY num_titles
+    STY num_titles + 1
+    STY num_screens
+
+.loop1
+    LDX #LINES_PER_SCREEN
+
+.loop2
+    LDA &FD00, Y
+    CMP #&FF
+    BEQ done
+    CMP #&FE
+    BNE loop3
+
+    LDY title_page
+    INY
+    STY title_page
+    STY &FCFF
+    LDY #&00
+    BEQ loop2
+
+.loop3
+    INY
+    LDA &FD00, Y
+    BPL loop3
+    INY
+    INC num_titles
+    BNE next_title
+    INC num_titles + 1
+
+.next_title
+    DEX
+    BNE loop2
+    INC num_screens
+    BNE loop1
+
+.done
+    RTS
+}
+
+
+.update_screen_number
+{
+    ;; Print the screen number in the top right corner
+    LDA #31
+    JSR OSWRCH
+    LDA #7
+    JSR OSWRCH
+    LDA #0
+    JSR OSWRCH
+    LDA #'0'
+    STA pad
+    LDA screen
+    STA num
+    JMP PrDec4
+}
+
 .skip_to_screen
 {
     LDY #0
     STY title_page
     STY &FCFF
 
-    LDA screen
+    LDX screen
+    DEX
     BEQ done
-    STA tmp
+    STX tmp
 
 .loop1
     LDX #LINES_PER_SCREEN
@@ -394,7 +533,7 @@ LINES_PER_SCREEN = 20
     BEQ loop
     CMP #'A'
     BCC not_caps
-    CMP #'Z'+1
+    CMP #'Z' + 1
     BCS not_caps
     PHA
     JSR fast_space
@@ -483,8 +622,34 @@ LINES_PER_SCREEN = 20
     JSR print_string
     EQUB 22, 3, 19, 0, 4, 0, 0, 0
     EQUB 23, 1, 0, 0, 0, 0, 0, 0, 0, 0
-    EQUB 31, 31, 0, "Electron Wifi Menu"
-    EQUB 31, 0, 2
+    EQUB "Screen 00/"
+    NOP
+    LDA num_screens
+    STA num
+    LDA #'0'
+    STA pad
+    JSR PrDec4
+    JSR print_string
+    EQUB 31, 33, 0, "Elk Wifi Menu", 31, 70, 0
+    NOP
+    LDA num_titles
+    STA num
+    LDA num_titles + 1
+    STA num + 1
+    LDA #0
+    STA pad
+    JSR PrDec16
+    JSR print_string
+    EQUB " Titles"
+    EQUB 31, 0, 24, "A-", 'A'+LINES_PER_SCREEN-1, ": Run Title; Up/Down: Prev/Next Screen; 01-"
+    NOP
+    LDA num_screens
+    STA num
+    LDA #'0'
+    STA pad
+    JSR PrDec4
+    JSR print_string
+    EQUB ": Jump to Screen"
     NOP
     RTS
 }
@@ -536,16 +701,120 @@ LINES_PER_SCREEN = 20
     STA tmp+1
     LDY #&00
 .loop
+    INC tmp
+    BNE load
+    INC tmp+1
+.load
     LDA (tmp), Y
     BMI done
     JSR OSASCI
-    INC tmp
-    BNE loop
-    INC tmp+1
-    BNE loop
+    JMP loop
 .done
     JMP (tmp)
 }
+
+;; ************************************************************
+;; Print 16-bit decimal number
+;; ************************************************************
+
+;  On entry, num=number to print
+;            pad=0 or pad character (eg '0' or ' ')
+;  On entry at PrDec16Lp1,
+;            Y=(number of digits)*2-2, eg 8 for 5 digits
+;  On exit,  A,X,Y,num,pad corrupted
+;  Size      69 bytes
+
+
+.PrDec24
+        LDY #24                  ; Offset to powers of ten
+        BNE PrDec
+
+.PrDec20
+        LDY #20                  ; Offset to powers of ten
+        BNE PrDec
+
+.PrDec16
+        LDA #0
+        STA num + 2
+        LDY #16                 ; Offset to powers of ten
+        BNE PrDec
+
+.PrDec12
+        LDA #0
+        STA num + 2
+        LDY #12                 ; Offset to powers of ten
+        BNE PrDec
+
+.PrDec8
+        LDA #0
+        STA num + 1
+        STA num + 2
+        LDY #8                  ; Offset to powers of ten
+        BNE PrDec
+
+.PrDec4
+        LDA #0
+        STA num + 1
+        STA num + 2
+        LDY #4                  ; Offset to powers of ten
+        BNE PrDec
+
+.PrDec
+{
+.PrDecLp1
+        LDX #&FF
+        SEC                     ; Start with digit=-1
+.PrDecLp2
+        LDA num+0
+        SBC PrDecTens+0,Y
+        STA num+0               ; Subtract current tens
+        LDA num+1
+        SBC PrDecTens+1,Y
+        STA num+1
+        LDA num+2
+        SBC PrDecTens+2,Y
+        STA num+2
+        INX
+        BCS PrDecLp2            ; Loop until <0
+        LDA num+0
+        ADC PrDecTens+0,Y
+        STA num+0               ; Add current tens back in
+        LDA num+1
+        ADC PrDecTens+1,Y
+        STA num+1
+        LDA num+2
+        ADC PrDecTens+2,Y
+        STA num+2
+        TXA
+        BNE PrDecDigit          ; Not zero, print it
+        LDA pad
+        BNE PrDecPrint
+        BEQ PrDecNext           ; pad<>0, use it
+.PrDecDigit
+        LDX #'0'
+        STX pad                 ; No more zero padding
+        ORA #'0'                ; Print this digit
+.PrDecPrint
+        JSR OSWRCH
+.PrDecNext
+        DEY
+        DEY
+        DEY
+        DEY
+        BPL PrDecLp1            ; Loop for next digit
+        RTS
+
+.PrDecTens
+        EQUD 1
+        EQUD 10
+        EQUD 100
+        EQUD 1000
+        EQUD 10000
+        EQUD 100000
+        EQUD 1000000
+        EQUD 10000000
+}
+
 
 .oscli_load_titles
     EQUB "*WGET -U http://acornelectron.nl/uefarchive/TITLES", &0D
