@@ -54,14 +54,6 @@ LINES_PER_SCREEN = 21
     LDX #1
     JSR OSBYTE
 
-    ;; Set the break action to 3
-    ;; Some games with locked blocks test for this
-    ;; (UPCFS should really be doing this)
-    LDA #200
-    LDX #3
-    LDY #0
-    JSR OSBYTE
-
     ;; Initialize screen
     JSR init_screen
 
