@@ -5,22 +5,28 @@ title_ptr        = &72
 title_page       = &74
 screen           = &75
 cursor           = &76
-tmpy             = &78
-mode             = &79
-num_screens      = &7A
-num_titles       = &7B
-num              = &7D
-pad              = &80
-jump             = &81
+tmpx             = &78
+tmpy             = &79
+pos              = &7A
+mode             = &7B
+num_screens      = &7C
+num_titles       = &7D
+jump             = &7F
+num              = &80
+pad              = &83
+iterator         = &84
 
 saved_title_ptr  = &C00
 saved_title_page = &C20
+search_buffer    = &C40
+
 uart_mcr         = &FC34
 
 OSRDCH           = &FFE0
 OSASCI           = &FFE3
 OSNEWL           = &FFE7
 OSWRCH           = &FFEE
+OSWORD           = &FFF1
 OSBYTE           = &FFF4
 OSCLI            = &FFF7
 
@@ -42,24 +48,29 @@ LINES_PER_SCREEN = 21
     ORA #&08
     STA uart_mcr
 
-    ;; Work out number of titles
-    JSR count_titles
-
-    ;; Start on screen 1
-    LDA #1
-    STA screen
-
     ;; Disable cursor editing so keys can be used to navigate
     LDA #4
     LDX #1
     JSR OSBYTE
 
-    ;; Initialize screen
-    JSR init_screen
-
     ;; Set update mode to slow
     LDA #0
     STA mode
+
+    ;; Clear the search buffer
+    STA search_buffer
+
+.loop0
+
+    ;; Start on screen 1
+    LDA #1
+    STA screen
+
+    ;; Work out number of titles
+    JSR count_titles
+
+    ;; Initialize screen
+    JSR init_screen
 
 .loop1
 
@@ -81,55 +92,42 @@ LINES_PER_SCREEN = 21
     STA cursor + 1
 
     ;; Display a screen full of titles
-    LDX #0
+    JSR display_titles
 
+    ;; Check if we have a full screen
 .loop2
-    ;; Save a pointer to this entry
-    LDA title_ptr
-    STA saved_title_ptr, X
-    LDA title_page
-    STA saved_title_page, X
-    STA &FCFF
-
-    ;; Read the first byte of the title
-    LDY #0
-    LDA (title_ptr), Y
-
-    ;; End of titles?
-    CMP #&FF
-    BEQ process_done
-
-    ;; End of page
-    CMP #&FE
-    BNE process_title
-
-    ;; Skip to the next page
-    INC title_page
-    LDA #0
-    STA title_ptr
-    BEQ loop2
-
-.process_title
-
-    JSR print_title
-
-    TYA
-    CLC
-    ADC title_ptr
-    STA title_ptr
-
-    INX
     CPX #LINES_PER_SCREEN
+    BCS done
+    ;; Display blank line
+    LDY #80
+.loop3
+    JSR fast_space
+    DEY
+    BNE loop3
+    INX
     BNE loop2
-
-.process_done
+.done
 
     JSR enable_screen
 
 .wait_for_key
 
     JSR OSRDCH
+    BCC not_escape
 
+    LDA #0
+    STA search_buffer
+    LDA #&7E
+    JSR OSBYTE
+    JMP loop0
+
+.not_escape
+    CMP #'/'
+    BNE not_slash
+    JSR enter_search
+    JMP loop0
+
+.not_slash
     CMP #'0'
     BCC not_0_9
     CMP #'9' +1
@@ -272,6 +270,46 @@ LINES_PER_SCREEN = 21
     EQUB &00
 
 
+.enter_search
+{
+    JSR print_string
+    EQUB 31, 0, 23, "Search: "
+    LDA #0
+    LDX #<osword0_pb
+    LDY #>osword0_pb
+    JSR OSWORD
+    BCC ok
+    LDA #&7E
+    JSR &FFF4
+    LDY #0
+.ok
+    ;; Terminate the search string with &00
+    LDA #0
+    STA search_buffer, Y
+
+    ;; Convert buffer to upper case, so matching is case-insensitive
+    ;; Silently drop spaces, as title data omits spaces
+    LDX #&FF
+    LDY #&FF
+.loop1
+    INX
+.loop2
+    INY
+    LDA search_buffer, Y
+    CMP #&20
+    BEQ loop2
+    AND #&DF
+    STA search_buffer, X
+    BNE loop1
+    RTS
+
+.osword0_pb
+    EQUW search_buffer
+    EQUB &20
+    EQUB &20
+    EQUB &7E
+}
+
 .next_screen
 {
     LDA screen
@@ -339,50 +377,136 @@ LINES_PER_SCREEN = 21
     RTS
 }
 
-
+;; Use the title iterator to count the number of titles and screens
 .count_titles
+{
+    JSR reset_iterator
+    LDA #0
+    STA num_titles
+    STA num_titles + 1
+    STA num_screens
+    LDX #1
+    JSR title_iterator
+    ;; Called for each matching title; &FD00,Y is the start of the title
+    DEX
+    BNE ct1
+    INC num_screens
+    LDX #LINES_PER_SCREEN
+.ct1
+    INC num_titles
+    BNE ct2
+    INC num_titles + 1
+.ct2
+    RTS
+}
+
+
+;; Use the title iterator to skip to the currently selected screen
+.skip_to_screen
+{
+    JSR reset_iterator
+    LDX screen
+    DEX
+    BEQ done1
+    STX tmp
+    LDX #LINES_PER_SCREEN+1
+    JSR title_iterator
+    ;; Called for each matching title; &FD00,Y is the start of the title
+    DEX
+    BNE done2
+    LDX #LINES_PER_SCREEN
+    DEC tmp
+    BNE done2
+    PLA
+    PLA
+.done1
+    STY title_ptr
+    LDA #&FD
+    STA title_ptr+1
+.done2
+    RTS
+}
+
+
+;; Use the title iterator to display the next LINE_PER_SCREEN titles
+.display_titles
+{
+
+    LDX #0
+    JSR title_iterator
+
+    ;; Called for each matching title
+
+    ;; Save a pointer to this entry
+    STY title_ptr
+    JSR print_title
+    LDY title_ptr
+    TYA
+    STA saved_title_ptr, X
+    LDA title_page
+    STA saved_title_page, X
+    INX
+    CPX #LINES_PER_SCREEN
+    BNE done
+    PLA
+    PLA
+.done
+    RTS
+}
+
+;; Reset the title iterator to the first title
+.reset_iterator
 {
     LDY #0
     STY title_page
     STY &FCFF
-    STY num_titles
-    STY num_titles + 1
-    STY num_screens
+    RTS
+}
 
-.loop1
-    LDX #LINES_PER_SCREEN
-
-.loop2
+;; Iterate through the remaining titles, calling back to the code following the JSR
+.title_iterator
+{
+    ;; Work out address of callback
+    PLA
+    CLC
+    ADC #1
+    STA iterator
+    PLA
+    ADC #0
+    STA iterator + 1
+.ti1
     LDA &FD00, Y
+    ;; Check for "end of titles" marker
     CMP #&FF
     BEQ done
+    ;; Check for "skip to next page" marker
     CMP #&FE
-    BNE loop3
-
+    BNE ti2
+    ;; Skip to next page
     LDY title_page
     INY
     STY title_page
     STY &FCFF
     LDY #&00
-    BEQ loop2
-
-.loop3
+    BEQ ti1
+.ti2
+    ;; Compare the title to the current search buffer
+    JSR compare_title
+    BCS ti3
+    ;; Only make the callback for titles that match
+    JSR callback
+.ti3
+    ;; Skip to the next title in current page
     INY
     LDA &FD00, Y
-    BPL loop3
+    BPL ti3
     INY
-    INC num_titles
-    BNE next_title
-    INC num_titles + 1
-
-.next_title
-    DEX
-    BNE loop2
-    INC num_screens
-    BNE loop1
-
+    BNE ti1
 .done
     RTS
+.callback
+    ;; Call back to the calling code, with &FD00,Y pointing to the title
+    JMP (iterator)
 }
 
 
@@ -402,53 +526,62 @@ LINES_PER_SCREEN = 21
     JMP PrDec4
 }
 
-.skip_to_screen
+
+;; Compare a title record with the search buffer (case insensitive)
+;;
+;; On Entry
+;;    &FD00, Y points to start of title record: <dir byte> <title string> <suffix>
+;;    search_buffer contains upper case search string, zero terminated
+;;
+;; On Exit:
+;;    returns C=0 if title matches search buffer, otherwise C=1
+;;
+;; Issues:
+;;    Won't match fake spaces
+
+.compare_title
 {
-    LDY #0
-    STY title_page
-    STY &FCFF
-
-    LDX screen
-    DEX
-    BEQ done
-    STX tmp
-
-.loop1
-    LDX #LINES_PER_SCREEN
-
-.loop2
-    LDA &FD00, Y
-    CMP #&FF
-    BEQ done
-    CMP #&FE
-    BNE loop3
-
-    ;; Skip to next page
-    LDY title_page
-    INY
-    STY title_page
-    STY &FCFF
-    LDY #&00
-    BEQ loop2
-
-.loop3
+    ;; default to match (C=0)
+    CLC
+    ;; fast test for the case where the search buffer is empty
+    LDA search_buffer
+    BNE ct0
+    RTS
+.ct0
+    ;; save X and Y
+    STX tmpx
+    STY tmpy
+    ;; no need to pre-decrement Y, as we need to skip over directory
+.ct1
+    ;; scan for first character of the search buffer
     INY
     LDA &FD00, Y
-    BPL loop3
-
+    BMI ct3 ;; match failed
+    EOR search_buffer
+    AND #&DF
+    BNE ct1
+    ;; remember position, in case of no match
+    STY pos
+    ;; compare remainder of search buffer
+    LDX #0
+.ct2
+    INX
     INY
-    DEX
-    BNE loop2
-
-    DEC tmp
-    BNE loop1
-
-.done
-    STY title_ptr
-
-    LDA #&FD
-    STA title_ptr+1
-
+    LDA search_buffer, X
+    BEQ ct4 ;; match succeeded
+    EOR &FD00, Y
+    AND #&DF
+    BEQ ct2
+    LDY pos
+    BNE ct1 ;; branch always
+.ct3
+    ;; return no match (C=1)
+    SEC
+.ct4
+    ;; restore X and Y
+    LDX tmpx
+    LDY tmpy
+.ct5
     RTS
 }
 
@@ -633,7 +766,7 @@ LINES_PER_SCREEN = 21
     JSR PrDec16
     JSR print_string
     EQUB " Titles"
-    EQUB 31, 0, 24, "A-", 'A'+LINES_PER_SCREEN-1, ": Run Title; Up/Down: Prev/Next Screen; 01-"
+    EQUB 31, 0, 24, "A-", 'A'+LINES_PER_SCREEN-1, " = Run Title; Up/Down = Prev/Next Screen; 01-"
     NOP
     LDA num_screens
     STA num
@@ -641,7 +774,7 @@ LINES_PER_SCREEN = 21
     STA pad
     JSR PrDec4
     JSR print_string
-    EQUB ": Jump to Screen"
+    EQUB " = Jump to Screen; / = Search"
     NOP
     RTS
 }
